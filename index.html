@@ -131,13 +131,15 @@ function showHome(me, note) {
     ${note ? `<div class="card">${esc(note)}</div>` : ''}
     ${me.ngayNghi ? '<div class="card">Hôm nay là ngày nghỉ chung của trường.</div>' : sess(me, 'S') + sess(me, 'C')}
     ${ql ? `<div class="card" style="color:var(--warn)">Có ${ql} lượt điểm danh lưu trên máy, sẽ tự gửi khi có mạng.</div>` : ''}
-    <div class="card"><b>Cách điểm danh:</b> mở ứng dụng Camera của điện thoại, hướng vào mã QR dán ở phòng hội đồng rồi chạm vào đường dẫn hiện ra. Không quét được thì nhập 6 số in dưới mã.</div>
+    <div class="card"><b>Cách điểm danh:</b> bấm nút Quét mã QR bên dưới rồi hướng camera vào mã dán ở phòng hội đồng. Cũng có thể quét bằng ứng dụng Camera của điện thoại. Không quét được thì nhập 6 số in dưới mã.</div>
+    <button class="big" id="scan">Quét mã QR để điểm danh</button>
     <input id="k" inputmode="numeric" maxlength="6" placeholder="6 số dưới mã QR" aria-label="Mã 6 số dưới mã QR">
-    <button class="big" id="go">Điểm danh bằng mã 6 số</button>
+    <button class="big sec" id="go">Điểm danh bằng mã 6 số</button>
     <button class="btn" id="tkb">Lịch dạy hôm nay</button>
     <button class="btn" id="rf">Cập nhật</button>
     <button class="btn" id="out" style="border:0;color:var(--mute)">Đổi người dùng</button></div>`;
   $('#go').onclick = () => { const k = $('#k').value.replace(/\D/g, ''); if (k.length !== 6) { $('#k').focus(); return; } startCheckin(k); };
+  $('#scan').onclick = () => showScan(me);
   $('#tkb').onclick = () => showTkb(me);
   $('#rf').onclick = () => refresh();
   $('#out').onclick = () => { if (window.confirm ? confirm('Xóa mã cá nhân trên điện thoại này?') : true) { store.del('ma'); store.del('me'); showLogin(); } };
@@ -148,6 +150,79 @@ function showTkb(me) {
   view.innerHTML = `<div style="display:grid;gap:14px"><h1 style="font-size:22px;margin:0">Lịch dạy hôm nay</h1>${part('S')}${part('C')}<button class="btn" id="bk">Quay lại</button></div>`;
   $('#bk').onclick = () => showHome(me);
 }
+
+/* ---------- Quét mã QR ngay trong ứng dụng ---------- */
+let scanStream = null;
+function stopScan() { if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; } }
+function loadJsQR() {
+  return window.jsQR ? Promise.resolve() : new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+    s.onload = ok; s.onerror = no;
+    document.head.appendChild(s);
+  });
+}
+/* Lấy mã 6 số từ nội dung mã QR: đường dẫn có ?k=xxxxxx hoặc chỉ 6 chữ số */
+function codeFrom(text) {
+  try { const k = new URL(text).searchParams.get('k'); if (k && /^\d{6}$/.test(k)) return k; } catch (e) {}
+  const m = String(text || '').match(/^\s*(\d{6})\s*$/);
+  return m ? m[1] : null;
+}
+async function showScan(me) {
+  view.innerHTML = `<div style="display:grid;gap:14px">
+    <h1 style="font-size:22px;margin:0">Quét mã QR</h1>
+    <p class="sm" style="margin:0">Hướng camera vào mã QR dán ở phòng hội đồng, giữ yên khoảng một giây.</p>
+    <video id="cam" playsinline muted style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:16px;background:#000"></video>
+    <p id="scanMsg" class="sm" style="margin:0">Đang mở camera…</p>
+    <button class="btn" id="bk">Quay lại</button></div>`;
+  let done = false;
+  const msg = t => { const p = $('#scanMsg'); if (p) p.textContent = t; };
+  $('#bk').onclick = () => { done = true; stopScan(); showHome(me); };
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg('Trình duyệt này không mở được camera. Quay lại và nhập 6 số dưới mã QR.'); return; }
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}, audio: false});
+  } catch (e) {
+    msg('Không mở được camera. Cho phép trang dùng Camera trong cài đặt trình duyệt, hoặc quay lại nhập 6 số dưới mã QR.');
+    return;
+  }
+  if (done) { stopScan(); return; }
+  const v = $('#cam');
+  v.srcObject = scanStream;
+  await v.play().catch(() => {});
+  let detect = null;
+  try {
+    if ('BarcodeDetector' in window && (await BarcodeDetector.getSupportedFormats()).includes('qr_code')) {
+      const bd = new BarcodeDetector({formats: ['qr_code']});
+      detect = async () => { const r = await bd.detect(v); return r.length ? r[0].rawValue : null; };
+    }
+  } catch (e) { detect = null; }
+  if (!detect) {
+    try { await loadJsQR(); } catch (e) { msg('Không tải được bộ đọc mã. Kiểm tra mạng, hoặc quay lại nhập 6 số dưới mã QR.'); return; }
+    const c = document.createElement('canvas'), x = c.getContext('2d', {willReadFrequently: true});
+    detect = async () => {
+      if (!v.videoWidth) return null;
+      const w = Math.min(v.videoWidth, 640), h = Math.round(v.videoHeight * w / v.videoWidth);
+      c.width = w; c.height = h;
+      x.drawImage(v, 0, 0, w, h);
+      const r = jsQR(x.getImageData(0, 0, w, h).data, w, h);
+      return r ? r.data : null;
+    };
+  }
+  msg('Đang tìm mã QR…');
+  const tick = async () => {
+    if (done || !scanStream) return;
+    let text = null;
+    try { text = await detect(); } catch (e) {}
+    if (text) {
+      const k = codeFrom(text);
+      if (k) { done = true; stopScan(); startCheckin(k); return; }
+      msg('Mã vừa quét không phải mã điểm danh của trường.');
+    }
+    setTimeout(tick, 250);
+  };
+  tick();
+}
+addEventListener('pagehide', stopScan);
 
 const thuTen = d => ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][d.getDay()];
 
