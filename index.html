@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Điểm danh NVH</title>
+<meta name="theme-color" content="#c8102e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Điểm danh">
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#fff,#0e151c);--ink:light-dark(#15202b,#e6ecf1);--mute:light-dark(#5b6875,#9aa8b4);--line:light-dark(#dfe5ea,#26333f);--panel:light-dark(#eef3f7,#16212b);--red:#c8102e;--blue:light-dark(#1f5f8b,#6fb3e0);--ok:light-dark(#18794e,#4cc38a);--warn:light-dark(#a35200,#f0a050)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:480px;margin:0 auto;padding:16px 18px 32px;display:flex;flex-direction:column;gap:14px}
+.app{font-weight:800;color:var(--red);font-size:15px;display:flex;justify-content:space-between;align-items:center}
+.net{font-size:13px;font-weight:600;color:var(--mute)}.net.off{color:var(--red)}
+.sm{font-size:14px;color:var(--mute)}
+.clock{font-size:54px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.card{background:var(--panel);border-radius:16px;padding:14px 16px}
+.card .k{font-size:13px;color:var(--mute)}
+.tag{display:inline-block;font-size:14px;font-weight:700;padding:2px 10px;border-radius:99px;margin-top:4px}
+.ok{background:light-dark(#e3f4ea,#173326);color:var(--ok)}.late{background:light-dark(#fff0e0,#3a2812);color:var(--warn)}.no{background:light-dark(#fde6e9,#3a161c);color:var(--red)}.na{border:1px dashed var(--line);color:var(--mute)}.off{background:var(--panel);color:var(--blue)}
+button,input{font:inherit}
+.big{width:100%;border:0;border-radius:18px;padding:18px;font-size:19px;font-weight:800;color:#fff;background:var(--red);min-height:64px;cursor:pointer}
+.big.sec{background:var(--blue)}
+.big:disabled{opacity:.5}
+.btn{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:12px;min-height:48px;font-weight:600;cursor:pointer}
+input{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:12px 14px;min-height:52px;font-size:22px;letter-spacing:2px;text-align:center}
+#ma{text-transform:uppercase}
+#ma::placeholder,#k::placeholder{letter-spacing:0;font-size:17px}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+.res{border-radius:18px;padding:18px;border:2px solid}
+.res.good{border-color:var(--ok)}.res.bad{border-color:var(--red)}.res.warn{border-color:var(--warn)}
+.res h2{margin:0 0 6px;font-size:22px;line-height:1.25}
+.res.good h2{color:var(--ok)}.res.bad h2{color:var(--red)}.res.warn h2{color:var(--warn)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:10px 0 0}dt{color:var(--mute)}dd{margin:0;font-weight:600}
+.row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:8px 0}.row:first-of-type{border-top:0}
+.spin{width:40px;height:40px;border:4px solid var(--line);border-top-color:var(--red);border-radius:50%;margin:8px auto;animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <div class="app"><span>NVH · Điểm danh</span><span class="net" id="net">Có mạng</span></div>
+  <div id="view"></div>
+</main>
+<script src="config.js"></script>
+<script>
+{
+const API = window.DIEMDANH_API || '';
+const $ = s => document.querySelector(s);
+const view = $('#view');
+const BUOI = {S:'buổi sáng', C:'buổi chiều'};
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('nvh_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('nvh_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('nvh_' + k); } catch (e) {} }
+};
+let device = store.get('device', null);
+if (!device) { device = 'd' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); store.set('device', device); }
+
+/* Mã QR mở trang với ?k=xxxxxx: ghi nhớ rồi xóa khỏi thanh địa chỉ để tải lại trang không gửi lần nữa */
+const params = new URLSearchParams(location.search);
+let pendingK = params.get('k');
+if (pendingK) history.replaceState(null, '', location.pathname);
+
+const setNet = () => { const n = $('#net'); n.textContent = navigator.onLine ? 'Có mạng' : 'Mất mạng'; n.classList.toggle('off', !navigator.onLine); };
+addEventListener('online', () => { setNet(); flushQueue(); });
+addEventListener('offline', setNet);
+setNet();
+
+async function api(method, payload) {
+  if (!/^https:\/\//.test(API)) throw new Error('config');
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = method === 'GET'
+      ? await fetch(API + '?' + new URLSearchParams(payload), {signal: ctrl.signal})
+      : await fetch(API, {method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal});
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+/* ---------- Đăng nhập bằng mã cá nhân ---------- */
+function showLogin(msg) {
+  view.innerHTML = `<div style="display:grid;gap:14px">
+    <h1 style="font-size:26px;line-height:1.2;margin:8px 0 0">Nhập mã cá nhân</h1>
+    <p class="sm" style="margin:0">Mã gồm 6 ký tự, Ban giám hiệu gửi riêng cho từng người. Chỉ cần nhập một lần trên điện thoại này.</p>
+    <input id="ma" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Mã cá nhân">
+    ${msg ? `<p style="margin:0;color:var(--red)">${esc(msg)}</p>` : ''}
+    <button class="big" id="go">Tiếp tục</button></div>`;
+  $('#go').onclick = async () => {
+    const ma = $('#ma').value.trim().toUpperCase();
+    if (ma.length < 4) { showLogin('Mã chưa đủ ký tự.'); return; }
+    $('#go').disabled = true; $('#go').textContent = 'Đang kiểm tra…';
+    try {
+      const r = await api('GET', {action: 'me', ma});
+      if (!r.ok) { showLogin(r.thongBao); return; }
+      store.set('ma', ma); store.set('me', r);
+      pendingK ? startCheckin(pendingK) : showHome(r);
+    } catch (e) { showLogin(e.message === 'config' ? 'Trang chưa được cấu hình địa chỉ máy chủ. Báo người quản trị.' : 'Không kết nối được. Kiểm tra mạng rồi thử lại.'); }
+  };
+}
+
+/* ---------- Màn hình chính ---------- */
+function sess(me, b) {
+  const x = me.buoi && me.buoi[b];
+  const title = b === 'S' ? 'Buổi sáng' : 'Buổi chiều';
+  if (!x) return `<div class="card"><div class="k">${title}</div><div class="sm">Không có tiết, không phải điểm danh</div></div>`;
+  let tag;
+  const q = queued().find(i => i.ngay === me.ngay && i.buoi === b);
+  if (x.nghi) tag = `<span class="tag off">Nghỉ phép</span>`;
+  else if (x.daDiemDanh) tag = x.daDiemDanh.tre > 0 ? `<span class="tag late">Trễ ${x.daDiemDanh.tre} phút · quét ${esc(x.daDiemDanh.gio)}</span>` : `<span class="tag ok">Đúng giờ · quét ${esc(x.daDiemDanh.gio)}</span>`;
+  else if (q) tag = `<span class="tag late">Đã lưu trên máy lúc ${esc(q.gio)}, chờ gửi</span>`;
+  else tag = `<span class="tag na">Chưa điểm danh</span>`;
+  return `<div class="card"><div class="k">${title}</div><div><b>Tiết ${x.tiet} lúc ${esc(x.gio)} · lớp ${esc(x.lop)} ${esc(x.mon)}</b> · ${esc(x.tenDiem)}</div>${tag}</div>`;
+}
+
+function showHome(me, note) {
+  me = me || store.get('me', null);
+  if (!me) { showLogin(); return; }
+  const now = new Date(), hm = now.toTimeString().slice(0, 5);
+  const ql = queued().length;
+  view.innerHTML = `<div style="display:grid;gap:14px">
+    <div><div class="sm">Xin chào, ${esc(me.ten)}</div><div class="clock">${hm}</div><div class="sm">${thuTen(now)}, ${now.toLocaleDateString('vi-VN')}</div></div>
+    ${note ? `<div class="card">${esc(note)}</div>` : ''}
+    ${me.ngayNghi ? '<div class="card">Hôm nay là ngày nghỉ chung của trường.</div>' : sess(me, 'S') + sess(me, 'C')}
+    ${ql ? `<div class="card" style="color:var(--warn)">Có ${ql} lượt điểm danh lưu trên máy, sẽ tự gửi khi có mạng.</div>` : ''}
+    <div class="card"><b>Cách điểm danh:</b> mở ứng dụng Camera của điện thoại, hướng vào mã QR dán ở phòng hội đồng rồi chạm vào đường dẫn hiện ra. Không quét được thì nhập 6 số in dưới mã.</div>
+    <input id="k" inputmode="numeric" maxlength="6" placeholder="6 số dưới mã QR" aria-label="Mã 6 số dưới mã QR">
+    <button class="big" id="go">Điểm danh bằng mã 6 số</button>
+    <button class="btn" id="tkb">Lịch dạy hôm nay</button>
+    <button class="btn" id="rf">Cập nhật</button>
+    <button class="btn" id="out" style="border:0;color:var(--mute)">Đổi người dùng</button></div>`;
+  $('#go').onclick = () => { const k = $('#k').value.replace(/\D/g, ''); if (k.length !== 6) { $('#k').focus(); return; } startCheckin(k); };
+  $('#tkb').onclick = () => showTkb(me);
+  $('#rf').onclick = () => refresh();
+  $('#out').onclick = () => { if (window.confirm ? confirm('Xóa mã cá nhân trên điện thoại này?') : true) { store.del('ma'); store.del('me'); showLogin(); } };
+}
+
+function showTkb(me) {
+  const part = b => { const l = (me.lich && me.lich[b]) || []; return `<div class="card"><div class="k">${b === 'S' ? 'Buổi sáng' : 'Buổi chiều'}</div>${l.length ? l.map(x => `<div class="row"><span>Tiết ${x.tiet} · ${esc(x.gio)}</span><span>${esc(x.lop)} ${esc(x.mon)}</span></div>`).join('') : '<div class="sm">Không có tiết</div>'}</div>`; };
+  view.innerHTML = `<div style="display:grid;gap:14px"><h1 style="font-size:22px;margin:0">Lịch dạy hôm nay</h1>${part('S')}${part('C')}<button class="btn" id="bk">Quay lại</button></div>`;
+  $('#bk').onclick = () => showHome(me);
+}
+
+const thuTen = d => ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][d.getDay()];
+
+async function refresh(note) {
+  const ma = store.get('ma', null);
+  if (!ma) { showLogin(); return; }
+  showHome(null, note);
+  try {
+    const r = await api('GET', {action: 'me', ma});
+    if (r.ok) { store.set('me', r); showHome(r, note); }
+    else if (r.loai === 'ma') { store.del('ma'); showLogin(r.thongBao); }
+  } catch (e) { /* mất mạng: giữ thông tin cũ */ }
+}
+
+/* ---------- Điểm danh ---------- */
+function getPos() {
+  return new Promise((ok, no) => {
+    if (!navigator.geolocation) { no({code: 99}); return; }
+    navigator.geolocation.getCurrentPosition(p => ok(p.coords), no, {enableHighAccuracy: true, timeout: 20000, maximumAge: 0});
+  });
+}
+const posErr = e => e.code === 1
+  ? 'Điện thoại chưa cho phép trang này dùng vị trí. Vào Cài đặt của trình duyệt, cho phép Vị trí cho trang điểm danh, rồi quét lại.'
+  : e.code === 3 ? 'Lấy vị trí quá lâu. Ra chỗ thoáng hơn hoặc bật GPS rồi quét lại.'
+  : 'Không lấy được vị trí. Bật định vị (GPS) rồi quét lại.';
+
+async function startCheckin(k) {
+  pendingK = null;
+  const ma = store.get('ma', null);
+  if (!ma) { pendingK = k; showLogin(); return; }
+  view.innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div class="spin"></div><div style="font-size:20px;font-weight:700">Đang lấy vị trí…</div><div class="sm">Giữ máy, đứng yên vài giây</div></div>`;
+  let c;
+  try { c = await getPos(); } catch (e) { showResult({ok: false, thongBao: posErr(e)}); return; }
+  const body = {action: 'checkin', ma, k, thietBi: device, lat: c.latitude, lng: c.longitude, acc: Math.round(c.accuracy)};
+  view.querySelector('.card').innerHTML = `<div class="spin"></div><div style="font-size:20px;font-weight:700">Đang gửi…</div><div class="sm">Máy chủ kiểm tra mã, vị trí và thời khóa biểu</div>`;
+  try {
+    const r = await api('POST', body);
+    showResult(r);
+  } catch (e) {
+    if (e.message === 'config') { showResult({ok: false, thongBao: 'Trang chưa được cấu hình địa chỉ máy chủ. Báo người quản trị.'}); return; }
+    const now = new Date();
+    const item = Object.assign(body, {guiSau: true, gioMay: now.toISOString(), gio: now.toTimeString().slice(0, 5), ngay: ymdLocal(now), buoi: now.getHours() < 12 ? 'S' : 'C'});
+    const q = queued(); q.push(item); store.set('queue', q);
+    showResult({ok: true, luuMay: true, gio: item.gio});
+  }
+}
+const ymdLocal = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+
+function showResult(r) {
+  let cls, head, bodyHtml = '';
+  if (r.luuMay) {
+    cls = 'warn'; head = 'Đã lưu trên máy';
+    bodyHtml = `<p style="margin:0">Đang mất mạng. Lượt điểm danh lúc ${esc(r.gio)} đã lưu trên điện thoại và sẽ tự gửi khi có mạng. Mở lại ứng dụng khi có sóng để chắc chắn đã gửi.</p>`;
+  } else if (r.ok) {
+    const x = r.ketQua || {};
+    cls = x.tre > 0 || x.ghiChu ? 'warn' : 'good';
+    head = r.daCo ? 'Đã điểm danh rồi' : `Đã điểm danh ${BUOI[x.buoi] || ''}`;
+    bodyHtml = `<dl><dt>Giờ quét</dt><dd>${esc(x.gio)}</dd><dt>Tiết đầu</dt><dd>Tiết ${esc(x.tiet)} lúc ${esc(x.gioChuan)}, lớp ${esc(x.lop)}</dd><dt>Nơi</dt><dd>${esc(x.diem)}${x.khoangCach !== '' && x.khoangCach != null ? ', cách mã ' + esc(x.khoangCach) + ' m' : ''}</dd><dt>Ghi nhận</dt><dd>${x.tre > 0 ? 'Trễ ' + esc(x.tre) + ' phút' : 'Đúng giờ'}</dd></dl>${x.ghiChu ? `<p class="sm" style="margin:10px 0 0">Ghi chú: ${esc(x.ghiChu)}</p>` : ''}`;
+  } else {
+    cls = r.loai === 'chuaden' || r.loai === 'khongtiet' ? 'warn' : 'bad';
+    head = r.loai === 'chuaden' ? 'Chưa đến giờ' : r.loai === 'khongtiet' ? 'Không cần điểm danh' : 'Không ghi nhận';
+    bodyHtml = `<p style="margin:0">${esc(r.thongBao || 'Có lỗi, thử lại sau.')}</p>`;
+    if (r.loai === 'ma') { store.del('ma'); }
+  }
+  view.innerHTML = `<div style="display:grid;gap:14px"><div class="res ${cls}"><h2>${head}</h2>${bodyHtml}</div><button class="big sec" id="bk">Về màn hình chính</button></div>`;
+  $('#bk').onclick = () => refresh();
+}
+
+/* ---------- Hàng chờ khi mất mạng ---------- */
+function queued() { return store.get('queue', []); }
+let flushing = false;
+async function flushQueue() {
+  if (flushing || !navigator.onLine) return;
+  const q = queued(); if (!q.length) return;
+  flushing = true;
+  const left = [];
+  let sent = 0;
+  for (const item of q) {
+    try { const r = await api('POST', item); sent++; if (!r.ok && r.loai === 'loi' && /máy chủ/.test(r.thongBao || '')) left.push(item); }
+    catch (e) { left.push(item); }
+  }
+  store.set('queue', left);
+  flushing = false;
+  if (sent && view.querySelector('#rf')) refresh('Đã gửi ' + sent + ' lượt điểm danh lưu lúc mất mạng.');
+}
+setInterval(flushQueue, 60000);
+
+/* ---------- Khởi động ---------- */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+const ma = store.get('ma', null);
+if (!ma) showLogin();
+else if (pendingK) startCheckin(pendingK);
+else refresh();
+flushQueue();
+}
+</script>
+</body>
+</html>
