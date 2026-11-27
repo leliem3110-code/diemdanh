@@ -1,6 +1,6 @@
 // Lưu sẵn giao diện để mở được ứng dụng cả khi mất mạng.
 // Khi sửa trang, tăng số phiên bản để điện thoại tải bản mới.
-const CACHE = 'diemdanh-v1';
+const CACHE = 'diemdanh-v2';
 const FILES = ['./', 'index.html', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
